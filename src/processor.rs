@@ -23,6 +23,7 @@ pub fn process_instruction(
     match TodoInstruction::unpack(instruction_data)? {
         TodoInstruction::InitTodoList => init_todo_list(program_id, accounts),
         TodoInstruction::AddTodo { message } => add_todo(program_id, accounts, message),
+        TodoInstruction::MarkCompleted { index } => mark_completed(program_id, accounts, index),
     }
 }
 
@@ -168,6 +169,51 @@ fn add_todo(program_id: &Pubkey, accounts: &[AccountInfo], message: String) -> P
     counter.count += 1;
     counter.serialize(&mut &mut pda_counter.data.borrow_mut()[..])?;
     msg!("Update counter: count = {}", counter.count);
+
+    Ok(())
+}
+
+fn mark_completed(program_id: &Pubkey, accounts: &[AccountInfo], index: u64) -> ProgramResult {
+    msg!("Mark Todo Completed");
+
+    let account_info_iter = &mut accounts.iter();
+    let initializer = next_account_info(account_info_iter)?;
+    let pda_todo = next_account_info(account_info_iter)?;
+
+    if !initializer.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    if pda_todo.owner != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+
+    let (pda, _) = Pubkey::find_program_address(
+        &[initializer.key.as_ref(), index.to_be_bytes().as_ref()],
+        program_id,
+    );
+    if pda_todo.key != &pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    msg!("Deserialize Todo Item...");
+    let mut todo = try_from_slice_unchecked::<TodoState>(&pda_todo.data.borrow())?;
+    if todo.discriminator != TodoState::DISCRIMINATOR {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    if !todo.is_initialized {
+        return Err(ProgramError::UninitializedAccount);
+    }
+    msg!(
+        "Todo index = {}, message = {}, is_completed = {}",
+        todo.index,
+        todo.message,
+        todo.is_completed
+    );
+
+    todo.is_completed = true;
+    todo.serialize(&mut &mut pda_todo.data.borrow_mut()[..])?;
+    msg!("Update todo: is_completed = {}", todo.is_completed);
 
     Ok(())
 }

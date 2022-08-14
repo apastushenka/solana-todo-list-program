@@ -14,6 +14,12 @@ use {
     solana_validator::test_validator::*,
 };
 
+enum TodoInstruction {
+    InitTodoList = 0,
+    AddTodo = 1,
+    MarkCompleted = 2,
+}
+
 #[test]
 fn test_program() {
     solana_logger::setup_with_default("solana_runtime::message=debug");
@@ -29,6 +35,8 @@ fn test_program() {
     init_todo_list(&rpc_client, &program_id, &payer);
 
     add_todo(&rpc_client, &program_id, &payer, 0, "ToDo");
+
+    mark_completed(&rpc_client, &program_id, &payer, 0);
 }
 
 fn init_todo_list(rpc_client: &RpcClient, program_id: &Pubkey, payer: &Keypair) {
@@ -42,7 +50,7 @@ fn init_todo_list(rpc_client: &RpcClient, program_id: &Pubkey, payer: &Keypair) 
                 AccountMeta::new(pda_counter, false),
                 AccountMeta::new_readonly(system_program::id(), false),
             ],
-            data: vec![0],
+            data: vec![TodoInstruction::InitTodoList as u8],
         }],
         Some(&payer.pubkey()),
     );
@@ -82,7 +90,7 @@ fn add_todo(
                 AccountMeta::new_readonly(system_program::id(), false),
             ],
             data: {
-                let mut vec = vec![1];
+                let mut vec = vec![TodoInstruction::AddTodo as u8];
                 vec.append(&mut borsh::to_vec(todo_message).unwrap());
                 vec
             },
@@ -109,4 +117,36 @@ fn add_todo(
     assert_eq!(counter.discriminator, TodoCounter::DISCRIMINATOR);
     assert_eq!(counter.is_initialized, true);
     assert_eq!(counter.count, 1);
+}
+
+fn mark_completed(rpc_client: &RpcClient, program_id: &Pubkey, payer: &Keypair, todo_index: u64) {
+    let (pda_todo, _) = Pubkey::find_program_address(
+        &[payer.pubkey().as_ref(), todo_index.to_be_bytes().as_ref()],
+        program_id,
+    );
+
+    let mut transaction = Transaction::new_with_payer(
+        &[Instruction {
+            program_id: *program_id,
+            accounts: vec![
+                AccountMeta::new(payer.pubkey(), false),
+                AccountMeta::new(pda_todo, false),
+            ],
+            data: {
+                let mut vec = vec![TodoInstruction::MarkCompleted as u8];
+                vec.append(&mut borsh::to_vec(&todo_index).unwrap());
+                vec
+            },
+        }],
+        Some(&payer.pubkey()),
+    );
+
+    transaction.sign(&[payer], rpc_client.get_latest_blockhash().unwrap());
+
+    assert_matches!(rpc_client.send_and_confirm_transaction(&transaction), Ok(_));
+
+    let todo_data = rpc_client.get_account_data(&pda_todo).unwrap();
+    let todo = try_from_slice_unchecked::<TodoState>(&todo_data).unwrap();
+
+    assert_eq!(todo.is_completed, true);
 }

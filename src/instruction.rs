@@ -4,11 +4,17 @@ use solana_program::program_error::ProgramError;
 pub enum TodoInstruction {
     InitTodoList,
     AddTodo { message: String },
+    MarkCompleted { index: u64 },
 }
 
 #[derive(BorshDeserialize)]
 struct AddTodoPayload {
     message: String,
+}
+
+#[derive(BorshDeserialize)]
+struct MarkCompletedPayload {
+    index: u64,
 }
 
 impl TodoInstruction {
@@ -23,6 +29,12 @@ impl TodoInstruction {
                 let payload = AddTodoPayload::try_from_slice(rest).unwrap();
                 Ok(TodoInstruction::AddTodo {
                     message: payload.message,
+                })
+            }
+            2 => {
+                let payload = MarkCompletedPayload::try_from_slice(rest).unwrap();
+                Ok(TodoInstruction::MarkCompleted {
+                    index: payload.index,
                 })
             }
             _ => Err(ProgramError::InvalidInstructionData),
